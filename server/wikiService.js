@@ -108,13 +108,43 @@ async function fetchArticle(title) {
   return { html: processedHtml, title: canonicalTitle };
 }
 
-async function fetchRandomArticle() {
+// An article is treated as a "stub" if it has fewer than this many outbound
+// links to other articles. Such articles are dead ends — you can't navigate
+// away from them — so they're unusable as a start or target. Tune as needed.
+const MIN_OUTBOUND_LINKS = 5;
+const RANDOM_BATCH = 10;
+
+async function fetchRandomBatch(count) {
   const url = `${WIKI_BASE()}/w/api.php`;
   const response = await wikiGet(url, {
-    params: { action: 'query', list: 'random', rnnamespace: 0, rnlimit: 1, format: 'json' },
+    params: { action: 'query', list: 'random', rnnamespace: 0, rnlimit: count, format: 'json' },
   });
-  const item = response.data.query.random[0];
-  return { title: item.title };
+  return (response.data.query?.random || []).map(r => r.title);
+}
+
+async function isStub(title) {
+  const links = await getArticleLinks(title);
+  return links.length < MIN_OUTBOUND_LINKS;
+}
+
+// Pick a random mainspace article. By default, stubs (articles with no
+// meaningful connections to other articles) are rejected and another pick is
+// tried, since the game requires navigating between linked articles.
+async function fetchRandomArticle({ excludeStubs = true, maxAttempts = 20 } = {}) {
+  if (!excludeStubs) {
+    const [title] = await fetchRandomBatch(1);
+    return { title };
+  }
+
+  let candidates = [];
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (candidates.length === 0) candidates = await fetchRandomBatch(RANDOM_BATCH);
+    const title = candidates.shift();
+    if (!title) continue;
+    if (!(await isStub(title))) return { title };
+    console.warn(`[wiki] skipping stub article "${title}"`);
+  }
+  throw new Error('Could not find a non-stub random article after several attempts.');
 }
 
 async function getArticleLinks(title) {
