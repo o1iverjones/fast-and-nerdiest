@@ -138,7 +138,11 @@ async function getArticleLinks(title) {
   const pageId = Object.keys(pages)[0];
   const links = pageId === '-1' ? [] : (pages[pageId].links || []).map(l => l.title);
 
-  linksCache.set(cacheKey, { links, ts: Date.now() });
+  // Don't cache empty results — they may be transient API failures rather than
+  // genuinely link-free articles, and caching them would freeze the bot permanently.
+  if (links.length > 0) {
+    linksCache.set(cacheKey, { links, ts: Date.now() });
+  }
   return links;
 }
 

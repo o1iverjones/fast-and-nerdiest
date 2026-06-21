@@ -1,5 +1,11 @@
 const { getArticleLinks } = require('./wikiService');
 
+// Used when the bot hits a dead-end article with no navigable links
+const FALLBACK_HUBS = [
+  'United States', 'History', 'Europe', 'Science', 'Geography',
+  'Mathematics', 'Philosophy', 'World War II', 'Biology', 'Physics',
+];
+
 const HUB_WORDS = [
   'United States', 'England', 'France', 'Germany', 'History', 'Science',
   'World War', 'British', 'American', 'European', 'University', 'London',
@@ -60,6 +66,14 @@ class Bot {
     if (!this.active) return;
 
     if (links.length === 0) {
+      // Dead-end article — backtrack to a random earlier article, or jump to
+      // a known hub if we're still at the start with nowhere to go back to.
+      const escape = this.path.length > 1
+        ? this.path[Math.floor(Math.random() * (this.path.length - 1))]
+        : FALLBACK_HUBS[Math.floor(Math.random() * FALLBACK_HUBS.length)];
+      this.currentArticle = escape;
+      this.path.push(escape);
+      this.onMove(escape, this.path.length - 1);
       this._scheduleMove();
       return;
     }

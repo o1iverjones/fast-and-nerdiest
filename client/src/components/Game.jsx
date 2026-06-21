@@ -8,11 +8,11 @@ const PREVIEW_SECONDS = 30;
 export default function Game({ config, onGameEnd, onLeave }) {
   const { roomId, startArticle, targetArticle, playerName } = config;
 
-  const [gameState, setGameState] = useState('countdown'); // countdown | preview | playing | finished
+  const [gameState, setGameState] = useState('countdown');
   const [countdown, setCountdown] = useState(3);
   const [previewSecondsLeft, setPreviewSecondsLeft] = useState(PREVIEW_SECONDS);
   const [currentArticle, setCurrentArticle] = useState(startArticle);
-  const [myPath, setMyPath] = useState([startArticle]);
+  const [myPath, setMyPath] = useState([startArticle]);      // full visit log, always grows
   const [myClicks, setMyClicks] = useState(0);
   const [opponent, setOpponent] = useState(null);
   const [elapsed, setElapsed] = useState(0);
@@ -23,9 +23,11 @@ export default function Game({ config, onGameEnd, onLeave }) {
   const countdownRef    = useRef(null);
   const previewTimerRef = useRef(null);
 
-  // Always-current ref used inside the popstate handler (avoids stale closure)
-  const currentArticleRef = useRef(currentArticle);
-  useEffect(() => { currentArticleRef.current = currentArticle; }, [currentArticle]);
+  // navHistoryRef: ordered list of articles visited in this navigation session.
+  // navCursorRef: current position index. Both updated synchronously so the
+  // popstate handler always sees latest state even before React re-renders.
+  const navHistoryRef = useRef([startArticle]);
+  const navCursorRef  = useRef(0);
 
   // 3-second lobby countdown
   useEffect(() => {
@@ -63,33 +65,35 @@ export default function Game({ config, onGameEnd, onLeave }) {
     return () => clearInterval(previewTimerRef.current);
   }, [gameState]);
 
-  // History-based back-button handling.
+  // Back/forward button interception.
   //
-  // We stamp every article visit into browser history via pushState so the
-  // browser maintains a real stack. popstate then fires with the exact article
-  // state to restore — no re-pushing required, so back/forward traverse the
-  // full stack naturally.
+  // Each article visit pushes a real history entry with a cursor index stored
+  // in state. popstate reads that cursor to know which article to restore —
+  // this gives the browser genuine back AND forward stacks for free.
   //
-  // If the user navigates past our first entry (tries to leave the game) we
-  // push the current article back to keep them in-game.
+  // If the browser pops past our first entry (trying to leave the game),
+  // e.state.gameId won't match and we re-push the current cursor to keep
+  // the player in-game.
   useEffect(() => {
     if (gameState !== 'playing') return;
 
-    // Stamp the start-of-race entry so popstate can identify it as ours
-    history.replaceState({ article: startArticle, gameId: roomId }, '');
+    // Seed history at cursor 0 for the start article.
+    navHistoryRef.current = [startArticle];
+    navCursorRef.current  = 0;
+    history.pushState({ cursor: 0, gameId: roomId }, '');
 
     function handlePopState(e) {
-      if (e.state?.gameId !== roomId || !e.state?.article) {
-        // Navigated outside game history — push current article to block the exit
-        history.pushState(
-          { article: currentArticleRef.current, gameId: roomId },
-          ''
-        );
+      if (!e.state || e.state.gameId !== roomId) {
+        // Outside game history — push current cursor back to trap them in-game.
+        history.pushState({ cursor: navCursorRef.current, gameId: roomId }, '');
         return;
       }
 
-      // Back/forward within game: update state to match what the browser popped
-      const { article } = e.state;
+      const newCursor = e.state.cursor;
+      const article   = navHistoryRef.current[newCursor];
+      if (article === undefined) return;
+
+      navCursorRef.current = newCursor;
       setCurrentArticle(article);
       setMyPath(prev => [...prev, article]);
       setMyClicks(prev => prev + 1);
@@ -122,6 +126,8 @@ export default function Game({ config, onGameEnd, onLeave }) {
       setCurrentArticle(startArticle);
       setMyPath([startArticle]);
       setMyClicks(0);
+      navHistoryRef.current = [startArticle];
+      navCursorRef.current  = 0;
     });
 
     socket.on('opponent_moved', ({ playerId, article, clickCount }) => {
@@ -169,10 +175,18 @@ export default function Game({ config, onGameEnd, onLeave }) {
     socket.emit('preview_ready', { roomId });
   }
 
-  // Forward navigation via link click: push into browser history AND update state
+  // Forward navigation via link click.
   const handleNavigate = useCallback((newArticle) => {
     if (gameState !== 'playing' || winner) return;
-    history.pushState({ article: newArticle, gameId: roomId }, '');
+
+    // Truncate any forward history if the player went back and is now branching.
+    const truncated = navHistoryRef.current.slice(0, navCursorRef.current + 1);
+    truncated.push(newArticle);
+    const newCursor = truncated.length - 1;
+    navHistoryRef.current = truncated;
+    navCursorRef.current  = newCursor;
+
+    history.pushState({ cursor: newCursor, gameId: roomId }, '');
     setCurrentArticle(newArticle);
     setMyPath(prev => [...prev, newArticle]);
     setMyClicks(prev => prev + 1);
