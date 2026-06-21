@@ -522,3 +522,106 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* ── Sidebar toggle bar (mobile only) ── */
+.sidebar-toggle-bar { display: none; }
+
+/* ── Sidebar content wrapper — transparent on desktop ── */
+.sidebar-content {
+  display: contents; /* acts as if the wrapper doesn't exist on desktop */
+}
+
+/* ── Mobile layout ── */
+@media (max-width: 700px) {
+  .game {
+    flex-direction: column;
+    height: 100dvh;
+  }
+
+  .game-article {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    width: 100%;
+    flex-shrink: 0;
+    border-left: none;
+    border-top: 2px solid var(--border);
+    overflow: visible;
+    position: relative;
+  }
+
+  /* Toggle bar: always visible strip */
+  .sidebar-toggle-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    cursor: pointer;
+    user-select: none;
+    background: var(--surface);
+    gap: 12px;
+  }
+  .sidebar-toggle-bar:active { background: var(--surface2); }
+
+  .sidebar-toggle-info {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+  .sidebar-toggle-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--text3);
+    flex-shrink: 0;
+  }
+  .sidebar-toggle-target {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sidebar-toggle-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .sidebar-toggle-timer {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .sidebar-toggle-arrow {
+    font-size: 18px;
+    color: var(--text3);
+    line-height: 1;
+  }
+
+  /* Collapsible content area */
+  .sidebar-content {
+    display: block;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.28s ease;
+    border-top: 1px solid var(--border);
+  }
+
+  .sidebar-expanded .sidebar-content {
+    max-height: 55vh;
+    overflow-y: auto;
+  }
+
+  /* Timer already shown in toggle bar — hide the redundant full section */
+  .sidebar-expanded .timer-section { display: none; }
+}
