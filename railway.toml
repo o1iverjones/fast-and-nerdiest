@@ -1,0 +1,8 @@
+[build]
+buildCommand = "npm run build"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/api/rooms"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
