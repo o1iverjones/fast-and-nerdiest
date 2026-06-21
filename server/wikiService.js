@@ -54,7 +54,11 @@ function processArticleHtml(html) {
   $('.sistersitebox, .portal, .noprint').remove();
   $('script, style').remove();
 
-  $('a[href^="/wiki/"]').each((_, el) => {
+  // Rewrite both <a> hyperlinks and <area> image-map regions. Without handling
+  // <area>, clicking a region of an image map (e.g. the US states map on the
+  // United States article) follows its raw /wiki/ href against our own origin,
+  // breaking out of the game.
+  $('a[href^="/wiki/"], area[href^="/wiki/"]').each((_, el) => {
     const $el = $(el);
     const href = $el.attr('href') || '';
     const rawTitle = href.slice(6).split('#')[0];
@@ -69,7 +73,7 @@ function processArticleHtml(html) {
     }
   });
 
-  $('a:not([data-wiki-link]):not(.wiki-disabled)').each((_, el) => {
+  $('a:not([data-wiki-link]):not(.wiki-disabled), area:not([data-wiki-link]):not(.wiki-disabled)').each((_, el) => {
     $(el).removeAttr('href').addClass('wiki-disabled');
   });
 
