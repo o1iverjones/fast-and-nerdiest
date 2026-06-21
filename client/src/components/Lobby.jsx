@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import socket from '../socket.js';
+import socket, { pid } from '../socket.js';
 
 const DIFFICULTIES = [
   { value: 'easy', label: 'Easy', desc: 'Slow & random' },
@@ -54,7 +54,7 @@ export default function Lobby({ onGameStart }) {
   function handleCreate() {
     if (!name.trim()) { setError('Enter your name first.'); return; }
     setError('');
-    socket.emit('create_room', { playerName: name.trim() });
+    socket.emit('create_room', { playerName: name.trim(), pid });
   }
 
   function handleJoin(code) {
@@ -62,13 +62,13 @@ export default function Lobby({ onGameStart }) {
     const target = (code || joinCode).trim().toUpperCase();
     if (!target) { setError('Enter a room code.'); return; }
     setError('');
-    socket.emit('join_room', { roomId: target, playerName: name.trim() });
+    socket.emit('join_room', { roomId: target, playerName: name.trim(), pid });
   }
 
   function handleBotGame() {
     if (!name.trim()) { setError('Enter your name first.'); return; }
     setError('');
-    socket.emit('create_bot_game', { playerName: name.trim(), difficulty: botDifficulty });
+    socket.emit('create_bot_game', { playerName: name.trim(), difficulty: botDifficulty, pid });
   }
 
   function handleStartGame() {
@@ -199,7 +199,7 @@ export default function Lobby({ onGameStart }) {
               )}
             </div>
 
-            {waitingRoom.host === socket.id && (
+            {waitingRoom.host === pid && (
               <button
                 className={`btn btn-primary ${!canStart ? 'disabled' : ''}`}
                 onClick={handleStartGame}
@@ -208,7 +208,7 @@ export default function Lobby({ onGameStart }) {
                 {canStart ? 'Start Race!' : 'Waiting for players…'}
               </button>
             )}
-            {waitingRoom.host !== socket.id && (
+            {waitingRoom.host !== pid && (
               <p className="hint">Waiting for the host to start the game…</p>
             )}
           </div>

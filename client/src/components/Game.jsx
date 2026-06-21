@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import socket from '../socket.js';
+import socket, { pid } from '../socket.js';
 import ArticleView from './ArticleView.jsx';
 import Sidebar from './Sidebar.jsx';
 
@@ -15,6 +15,7 @@ export default function Game({ config, onGameEnd, onLeave }) {
   const [myPath, setMyPath] = useState([startArticle]);      // full visit log, always grows
   const [myClicks, setMyClicks] = useState(0);
   const [opponent, setOpponent] = useState(null);
+  const [opponentStatus, setOpponentStatus] = useState('online'); // online | reconnecting | left
   const [elapsed, setElapsed] = useState(0);
   const [winner, setWinner] = useState(null);
 
@@ -114,7 +115,7 @@ export default function Game({ config, onGameEnd, onLeave }) {
       setGameState('preview');
       setCountdown(null);
       fetch(`/api/wiki/article/${encodeURIComponent(startArticle)}`).catch(() => {});
-      const others = Object.values(room.players).filter(p => p.id !== socket.id);
+      const others = Object.values(room.players).filter(p => p.id !== pid);
       if (others.length > 0) {
         // Head-to-head: the opponent starts on my target article.
         setOpponent({ ...others[0], path: [targetArticle] });
@@ -146,19 +147,30 @@ export default function Game({ config, onGameEnd, onLeave }) {
       setWinner({ id: winnerId, name: winnerName });
       setTimeout(() => {
         onGameEnd({
-          didIWin: winnerId === socket.id,
+          didIWin: winnerId === pid,
           winnerName,
           paths,
           startArticle,
           targetArticle,
           duration,
-          myId: socket.id,
+          myId: pid,
         });
       }, 1500);
     });
 
-    socket.on('player_disconnected', ({ playerId }) => {
-      setOpponent(prev => prev?.id === playerId ? { ...prev, name: prev.name + ' (left)' } : prev);
+    // Opponent temporarily dropped — may reconnect within the grace period.
+    socket.on('player_disconnected', () => {
+      setOpponentStatus('reconnecting');
+    });
+
+    // Opponent came back.
+    socket.on('player_reconnected', () => {
+      setOpponentStatus('online');
+    });
+
+    // Opponent gone for good (grace expired).
+    socket.on('player_left', () => {
+      setOpponentStatus('left');
     });
 
     return () => {
@@ -167,8 +179,63 @@ export default function Game({ config, onGameEnd, onLeave }) {
       socket.off('opponent_moved');
       socket.off('game_over');
       socket.off('player_disconnected');
+      socket.off('player_reconnected');
+      socket.off('player_left');
     };
   }, [startArticle, targetArticle, onGameEnd]);
+
+  // Reconnect handling: when our socket re-establishes (e.g. after the tab was
+  // backgrounded), tell the server who we are so it re-binds our slot and
+  // resyncs game state. socket 'connect' fires only on reconnects here, since
+  // the socket was already connected before this component mounted.
+  useEffect(() => {
+    function handleConnect() {
+      socket.emit('rejoin', { roomId, pid });
+    }
+
+    function handleRejoinAccepted(data) {
+      setOpponentStatus('online');
+
+      if (data.status === 'finished' && data.winnerId) {
+        clearInterval(timerRef.current);
+        setGameState('finished');
+        setWinner({ id: data.winnerId, name: data.winnerName });
+        onGameEnd({
+          didIWin: data.winnerId === pid,
+          winnerName: data.winnerName,
+          paths: data.paths,
+          startArticle,
+          targetArticle,
+          duration: data.duration,
+          myId: pid,
+        });
+        return;
+      }
+
+      // Resync the opponent's position, which may have advanced while we were
+      // disconnected. Our own state is preserved in memory (no page reload).
+      const others = Object.values(data.room.players).filter(p => p.id !== pid);
+      if (others.length > 0) {
+        const o = others[0];
+        setOpponent(prev => ({
+          ...(prev || {}),
+          id: o.id,
+          name: o.name,
+          currentArticle: o.currentArticle,
+          clickCount: o.clickCount,
+          path: prev?.path || [targetArticle],
+        }));
+      }
+    }
+
+    socket.on('connect', handleConnect);
+    socket.on('rejoin_accepted', handleRejoinAccepted);
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('rejoin_accepted', handleRejoinAccepted);
+    };
+  }, [roomId, startArticle, targetArticle, onGameEnd]);
 
   function handleSkipPreview() {
     stopPreviewTimer();
@@ -198,7 +265,7 @@ export default function Game({ config, onGameEnd, onLeave }) {
   const articleToShow = isPreview ? targetArticle : currentArticle;
 
   const myPlayer = {
-    id: socket.id,
+    id: pid,
     name: playerName,
     currentArticle: isPreview ? startArticle : currentArticle,
     clickCount: myClicks,
@@ -230,6 +297,7 @@ export default function Game({ config, onGameEnd, onLeave }) {
       <Sidebar
         myPlayer={myPlayer}
         opponent={opponent}
+        opponentStatus={opponentStatus}
         targetArticle={targetArticle}
         startArticle={startArticle}
         elapsed={elapsed}

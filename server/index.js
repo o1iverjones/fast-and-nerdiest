@@ -17,10 +17,12 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 const PREVIEW_DURATION = 30_000; // ms
+const DISCONNECT_GRACE = 60_000; // ms a player can be gone before removal
 
-const activeBots    = new Map(); // roomId -> Bot
-const previewReady  = new Map(); // roomId -> Set of playerIds who skipped
-const previewTimers = new Map(); // roomId -> setTimeout handle
+const activeBots       = new Map(); // roomId -> Bot
+const previewReady     = new Map(); // roomId -> Set of playerIds who skipped
+const previewTimers    = new Map(); // roomId -> setTimeout handle
+const disconnectTimers = new Map(); // pid -> setTimeout handle (grace period)
 
 app.use(cors());
 app.use(express.json());
@@ -76,15 +78,15 @@ io.on('connection', (socket) => {
     socket.emit('rooms_list', gm.getPublicRooms());
   });
 
-  socket.on('create_room', ({ playerName }) => {
-    const room = gm.createRoom(socket.id, playerName);
+  socket.on('create_room', ({ playerName, pid }) => {
+    const room = gm.createRoom(pid, playerName, socket.id);
     socket.join(room.id);
     socket.emit('room_created', { roomId: room.id, room: serializeRoom(room) });
     broadcastRooms();
   });
 
-  socket.on('join_room', ({ roomId, playerName }) => {
-    const room = gm.joinRoom(roomId, socket.id, playerName);
+  socket.on('join_room', ({ roomId, playerName, pid }) => {
+    const room = gm.joinRoom(roomId, pid, playerName, socket.id);
     if (!room) {
       socket.emit('error', { message: 'Room not found or already full.' });
       return;
@@ -94,12 +96,46 @@ io.on('connection', (socket) => {
     broadcastRooms();
   });
 
-  socket.on('create_bot_game', ({ playerName, difficulty }) => {
-    const room = gm.createRoom(socket.id, playerName);
+  socket.on('create_bot_game', ({ playerName, difficulty, pid }) => {
+    const room = gm.createRoom(pid, playerName, socket.id);
     gm.addBot(room.id, difficulty);
     socket.join(room.id);
     const updated = gm.getRoom(room.id);
     socket.emit('room_created', { roomId: room.id, room: serializeRoom(updated) });
+  });
+
+  // Reconnect: re-bind a returning player's stable pid to this new socket.
+  socket.on('rejoin', ({ roomId, pid }) => {
+    const room = gm.getRoom(roomId);
+    if (!room || !room.players[pid]) {
+      socket.emit('rejoin_failed');
+      return;
+    }
+
+    const timer = disconnectTimers.get(pid);
+    if (timer) { clearTimeout(timer); disconnectTimers.delete(pid); }
+
+    gm.bindSocket(pid, socket.id);
+    socket.join(roomId);
+
+    const player = room.players[pid];
+    const payload = {
+      room: serializeRoom(room),
+      status: room.status,
+      startArticle: player.startArticle,
+      targetArticle: player.targetArticle,
+      currentArticle: player.currentArticle,
+      path: [...player.path],
+      clickCount: player.clickCount,
+    };
+    if (room.status === 'finished') {
+      payload.winnerId = room.winner;
+      payload.winnerName = room.players[room.winner]?.name || 'Player';
+      payload.paths = gm.getPaths(roomId);
+      payload.duration = (room.endTime || 0) - (room.startTime || 0);
+    }
+    socket.emit('rejoin_accepted', payload);
+    socket.to(roomId).emit('player_reconnected', { playerId: pid });
   });
 
   // --- Game ---
@@ -107,7 +143,7 @@ io.on('connection', (socket) => {
   socket.on('start_game', async ({ roomId }) => {
     const room = gm.getRoom(roomId);
     if (!room) return;
-    if (room.host !== socket.id) return;
+    if (room.host !== gm.getPidBySocket(socket.id)) return;
 
     let articleA, articleB;
     try {
@@ -122,8 +158,8 @@ io.on('connection', (socket) => {
 
     // Countdown phase — each player sees their own start/target (head-to-head).
     for (const player of Object.values(matchup.players)) {
-      if (player.isBot) continue;
-      io.to(player.id).emit('game_countdown', {
+      if (player.isBot || !player.socketId) continue;
+      io.to(player.socketId).emit('game_countdown', {
         startArticle: player.startArticle,
         targetArticle: player.targetArticle,
         seconds: 3,
@@ -136,8 +172,8 @@ io.on('connection', (socket) => {
 
       // Tell each client to show their own target article preview.
       for (const player of Object.values(previewing.players)) {
-        if (player.isBot) continue;
-        io.to(player.id).emit('game_started', {
+        if (player.isBot || !player.socketId) continue;
+        io.to(player.socketId).emit('game_started', {
           startArticle: player.startArticle,
           targetArticle: player.targetArticle,
           room: serializeRoom(previewing),
@@ -155,10 +191,11 @@ io.on('connection', (socket) => {
   socket.on('preview_ready', ({ roomId }) => {
     const room = gm.getRoom(roomId);
     if (!room || room.status !== 'preview') return;
-    if (!room.players[socket.id] || room.players[socket.id].isBot) return;
+    const pid = gm.getPidBySocket(socket.id);
+    if (!pid || !room.players[pid] || room.players[pid].isBot) return;
 
     const ready = previewReady.get(roomId) || new Set();
-    ready.add(socket.id);
+    ready.add(pid);
     previewReady.set(roomId, ready);
 
     // Check if all human players are ready
@@ -171,28 +208,29 @@ io.on('connection', (socket) => {
   socket.on('article_changed', ({ roomId, article }) => {
     const room = gm.getRoom(roomId);
     if (!room || room.status !== 'playing') return;
-    if (!room.players[socket.id]) return;
+    const pid = gm.getPidBySocket(socket.id);
+    if (!pid || !room.players[pid]) return;
 
-    gm.updatePlayerArticle(roomId, socket.id, article);
+    gm.updatePlayerArticle(roomId, pid, article);
     const updated = gm.getRoom(roomId);
-    const player = updated.players[socket.id];
+    const player = updated.players[pid];
 
     socket.to(roomId).emit('opponent_moved', {
-      playerId: socket.id,
+      playerId: pid,
       article,
       clickCount: player.clickCount,
     });
 
     // Check win against this player's own target (head-to-head).
     if (article.toLowerCase() === player.targetArticle.toLowerCase()) {
-      const result = gm.setWinner(roomId, socket.id);
+      const result = gm.setWinner(roomId, pid);
       if (!result) return;
 
       cleanupBot(roomId);
 
       io.to(roomId).emit('game_over', {
-        winnerId: socket.id,
-        winnerName: result.players[socket.id]?.name || 'Player',
+        winnerId: pid,
+        winnerName: result.players[pid]?.name || 'Player',
         paths: gm.getPaths(roomId),
         duration: result.endTime - result.startTime,
       });
@@ -200,13 +238,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('rematch_request', ({ roomId }) => {
-    socket.to(roomId).emit('rematch_requested', { from: socket.id });
+    socket.to(roomId).emit('rematch_requested', { from: gm.getPidBySocket(socket.id) });
   });
 
   socket.on('chat_message', ({ roomId, message }) => {
     const room = gm.getRoom(roomId);
-    if (!room || !room.players[socket.id]) return;
-    const name = room.players[socket.id].name;
+    const pid = gm.getPidBySocket(socket.id);
+    if (!room || !pid || !room.players[pid]) return;
+    const name = room.players[pid].name;
     const safe = message.slice(0, 200);
     io.to(roomId).emit('chat_message', { name, message: safe });
   });
@@ -215,18 +254,45 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`[disconnect] ${socket.id}`);
-    const room = gm.getRoomByPlayerId(socket.id);
-    const roomId = room?.id;
+    const info = gm.markDisconnected(socket.id);
+    if (!info || !info.roomId) return;
+    const { pid, roomId } = info;
 
-    gm.removePlayer(socket.id);
+    const room = gm.getRoom(roomId);
+    if (!room) return;
 
-    if (roomId) {
-      cleanupBot(roomId);
-      io.to(roomId).emit('player_disconnected', { playerId: socket.id });
-      broadcastRooms();
+    // Outside an active game (lobby), remove immediately. During a game, keep
+    // the slot for a grace period so the player can reconnect.
+    const inGame = ['countdown', 'preview', 'playing'].includes(room.status);
+    if (!inGame) {
+      finalizeRemoval(pid);
+      return;
     }
+
+    io.to(roomId).emit('player_disconnected', { playerId: pid });
+
+    const existing = disconnectTimers.get(pid);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      disconnectTimers.delete(pid);
+      finalizeRemoval(pid);
+    }, DISCONNECT_GRACE);
+    disconnectTimers.set(pid, timer);
   });
 });
+
+// Permanently remove a player after the grace period (or in the lobby) and
+// notify the room.
+function finalizeRemoval(pid) {
+  const room = gm.getRoomByPid(pid);
+  const roomId = room?.id;
+  gm.removePlayer(pid);
+  if (roomId) {
+    cleanupBot(roomId);
+    io.to(roomId).emit('player_left', { playerId: pid });
+    broadcastRooms();
+  }
+}
 
 function launchRace(roomId) {
   // Clear preview state

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 
-export default function Sidebar({ myPlayer, opponent, targetArticle, startArticle, elapsed, countdown, previewSecondsLeft }) {
+const STATUS_SUFFIX = { reconnecting: ' (reconnecting…)', left: ' (left)' };
+
+export default function Sidebar({ myPlayer, opponent, opponentStatus, targetArticle, startArticle, elapsed, countdown, previewSecondsLeft }) {
   const [collapsed, setCollapsed] = useState(true);
 
   function formatTime(ms) {
@@ -60,7 +62,11 @@ export default function Sidebar({ myPlayer, opponent, targetArticle, startArticl
           <div className="sidebar-label">Players</div>
           <PlayerCard player={myPlayer} label="You" isYou targetArticle={targetArticle} />
           {opponent && (
-            <PlayerCard player={opponent} label={opponent.name} targetArticle={targetArticle} />
+            <PlayerCard
+              player={opponent}
+              label={opponent.name + (STATUS_SUFFIX[opponentStatus] || '')}
+              targetArticle={targetArticle}
+            />
           )}
         </div>
 
