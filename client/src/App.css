@@ -290,6 +290,20 @@ body {
 .article-body table { border-collapse: collapse; margin-bottom: 1em; font-size: .875em; }
 .article-body td, .article-body th { border: 1px solid #a2a9b1; padding: 4px 8px; vertical-align: top; }
 .article-body th { background: #eaecf0; }
+
+/* Wikipedia sidebar/navbox templates reuse generic class names like "sidebar"
+   and "sidebar-content" — the same classes as the in-game sidebar — so its dark
+   background leaked onto article tables and made the blue links unreadable.
+   Force article content onto a light background. */
+.article-body table,
+.article-body tbody,
+.article-body tr,
+.article-body td,
+.article-body .sidebar,
+.article-body .sidebar-content {
+  background: #fff;
+  color: #202122;
+}
 .article-body img { max-width: 100%; height: auto; }
 .article-body figure { margin: 0 0 1em; }
 .article-body figcaption { font-size: .875em; color: #555; }
