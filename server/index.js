@@ -109,28 +109,41 @@ io.on('connection', (socket) => {
     if (!room) return;
     if (room.host !== socket.id) return;
 
-    let startArticle, targetArticle;
+    let articleA, articleB;
     try {
-      [startArticle, targetArticle] = await pickArticlePair();
+      [articleA, articleB] = await pickArticlePair();
     } catch {
       socket.emit('error', { message: 'Could not fetch Wikipedia articles. Check your connection.' });
       return;
     }
 
-    // Countdown phase
-    io.to(roomId).emit('game_countdown', { startArticle, targetArticle, seconds: 3 });
+    const matchup = gm.assignMatchup(roomId, articleA, articleB);
+    if (!matchup) return;
+
+    // Countdown phase — each player sees their own start/target (head-to-head).
+    for (const player of Object.values(matchup.players)) {
+      if (player.isBot) continue;
+      io.to(player.id).emit('game_countdown', {
+        startArticle: player.startArticle,
+        targetArticle: player.targetArticle,
+        seconds: 3,
+      });
+    }
 
     setTimeout(() => {
-      const previewing = gm.beginPreview(roomId, startArticle, targetArticle);
+      const previewing = gm.beginPreview(roomId);
       if (!previewing) return;
 
-      // Tell clients to show target article preview
-      io.to(roomId).emit('game_started', {
-        startArticle,
-        targetArticle,
-        room: serializeRoom(previewing),
-        previewDuration: PREVIEW_DURATION,
-      });
+      // Tell each client to show their own target article preview.
+      for (const player of Object.values(previewing.players)) {
+        if (player.isBot) continue;
+        io.to(player.id).emit('game_started', {
+          startArticle: player.startArticle,
+          targetArticle: player.targetArticle,
+          room: serializeRoom(previewing),
+          previewDuration: PREVIEW_DURATION,
+        });
+      }
 
       // Server-side 30s timer — fires if not all players skip first
       previewReady.set(roomId, new Set());
@@ -170,8 +183,8 @@ io.on('connection', (socket) => {
       clickCount: player.clickCount,
     });
 
-    // Check win
-    if (article.toLowerCase() === room.targetArticle.toLowerCase()) {
+    // Check win against this player's own target (head-to-head).
+    if (article.toLowerCase() === player.targetArticle.toLowerCase()) {
       const result = gm.setWinner(roomId, socket.id);
       if (!result) return;
 
@@ -230,10 +243,10 @@ function launchRace(roomId) {
   // Start bot now that the race is live
   if (room.hasBot) {
     const botId = `bot-${roomId}`;
-    const { startArticle, targetArticle, botDifficulty } = room;
+    const botPlayer = room.players[botId];
     const bot = new Bot({
-      difficulty: botDifficulty,
-      targetArticle,
+      difficulty: room.botDifficulty,
+      targetArticle: botPlayer.targetArticle,
       onMove: (article, clickCount) => {
         gm.updatePlayerArticle(roomId, botId, article);
         io.to(roomId).emit('opponent_moved', { playerId: botId, article, clickCount });
@@ -251,7 +264,7 @@ function launchRace(roomId) {
       },
     });
     activeBots.set(roomId, bot);
-    bot.start(startArticle);
+    bot.start(botPlayer.startArticle);
   }
 }
 

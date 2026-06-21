@@ -31,7 +31,7 @@ function createRoom(hostId, hostName) {
 }
 
 function makePlayer(id, name, isBot = false) {
-  return { id, name, currentArticle: null, path: [], clickCount: 0, isBot };
+  return { id, name, startArticle: null, targetArticle: null, currentArticle: null, path: [], clickCount: 0, isBot };
 }
 
 function joinRoom(roomId, playerId, playerName) {
@@ -56,20 +56,37 @@ function addBot(roomId, difficulty) {
   return room;
 }
 
-function beginPreview(roomId, startArticle, targetArticle) {
+// Head-to-head matchup: each player starts on one article and must reach the
+// other. With two players they race toward each other's starting article —
+// each player's target is the opponent's start.
+function assignMatchup(roomId, articleA, articleB) {
   const room = rooms.get(roomId);
   if (!room) return null;
 
-  room.startArticle = startArticle;
-  room.targetArticle = targetArticle;
-  room.status = 'preview';
-
-  for (const player of Object.values(room.players)) {
-    player.currentArticle = startArticle;
-    player.path = [startArticle];
+  Object.values(room.players).forEach((player, i) => {
+    const start  = i % 2 === 0 ? articleA : articleB;
+    const target = i % 2 === 0 ? articleB : articleA;
+    player.startArticle   = start;
+    player.targetArticle  = target;
+    player.currentArticle = start;
+    player.path = [start];
     player.clickCount = 0;
-  }
+  });
 
+  // Room-level fields retained for reference (host's perspective). Setting
+  // status to 'countdown' also blocks new joins during the matchup window.
+  room.startArticle = articleA;
+  room.targetArticle = articleB;
+  room.status = 'countdown';
+
+  return room;
+}
+
+function beginPreview(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return null;
+
+  room.status = 'preview';
   return room;
 }
 
@@ -158,6 +175,6 @@ function getRoomByPlayerId(playerId) {
 }
 
 module.exports = {
-  createRoom, joinRoom, addBot, beginPreview, startRace, updatePlayerArticle,
+  createRoom, joinRoom, addBot, assignMatchup, beginPreview, startRace, updatePlayerArticle,
   setWinner, getPaths, getRoom, getPublicRooms, removePlayer, getRoomByPlayerId
 };

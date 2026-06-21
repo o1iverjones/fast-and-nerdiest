@@ -116,7 +116,8 @@ export default function Game({ config, onGameEnd, onLeave }) {
       fetch(`/api/wiki/article/${encodeURIComponent(startArticle)}`).catch(() => {});
       const others = Object.values(room.players).filter(p => p.id !== socket.id);
       if (others.length > 0) {
-        setOpponent({ ...others[0], path: [startArticle] });
+        // Head-to-head: the opponent starts on my target article.
+        setOpponent({ ...others[0], path: [targetArticle] });
       }
     });
 
@@ -133,7 +134,7 @@ export default function Game({ config, onGameEnd, onLeave }) {
     socket.on('opponent_moved', ({ playerId, article, clickCount }) => {
       setOpponent(prev => {
         if (!prev || prev.id !== playerId) {
-          return { id: playerId, name: prev?.name || 'Opponent', currentArticle: article, clickCount, path: [...(prev?.path || [startArticle]), article] };
+          return { id: playerId, name: prev?.name || 'Opponent', currentArticle: article, clickCount, path: [...(prev?.path || [targetArticle]), article] };
         }
         return { ...prev, currentArticle: article, clickCount, path: [...(prev.path || []), article] };
       });
