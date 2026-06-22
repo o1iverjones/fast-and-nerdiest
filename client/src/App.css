@@ -639,3 +639,85 @@ body {
   /* Timer already shown in toggle bar — hide the redundant full section */
   .sidebar-expanded .timer-section { display: none; }
 }
+
+/* ── Leaderboards ── */
+.leaderboards {
+  width: 100%;
+  max-width: 760px;
+  margin: 40px auto 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.lb-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.lb-title {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+
+.lb-empty { color: var(--text3); font-size: 13px; padding: 8px 0; }
+
+.lb-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+
+.lb-game {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.lb-game-players { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.lb-player { display: inline-flex; align-items: center; gap: 5px; color: var(--text2); }
+.lb-player.winner { color: var(--text); font-weight: 600; }
+.lb-star { color: var(--accent2); }
+.lb-clicks { color: var(--text3); font-size: 11px; }
+.lb-vs { color: var(--text3); font-size: 11px; }
+.lb-duration { color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.lb-top { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.lb-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: var(--text3);
+  margin-bottom: 8px;
+}
+.lb-rank { list-style: none; counter-reset: rank; display: flex; flex-direction: column; gap: 6px; }
+.lb-rank li {
+  counter-increment: rank;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.lb-rank li::before {
+  content: counter(rank);
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 700;
+  width: 14px;
+  flex-shrink: 0;
+}
+.lb-rank-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-rank-val { color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .leaderboards { grid-template-columns: 1fr; }
+}

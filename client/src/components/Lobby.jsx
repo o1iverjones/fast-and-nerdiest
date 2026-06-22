@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import socket, { pid } from '../socket.js';
+import Leaderboards from './Leaderboards.jsx';
 
 const DIFFICULTIES = [
   { value: 'easy', label: 'Easy', desc: 'Slow & random' },
@@ -214,6 +215,8 @@ export default function Lobby({ onGameStart }) {
           </div>
         )}
       </div>
+
+      {!waitingRoom && <Leaderboards />}
     </div>
   );
 }

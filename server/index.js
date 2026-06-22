@@ -7,6 +7,7 @@ const path = require('path');
 
 const gm = require('./gameManager');
 const Bot = require('./bot');
+const leaderboard = require('./leaderboard');
 const { fetchArticle, fetchRandomArticle } = require('./wikiService');
 
 const app = express();
@@ -50,6 +51,10 @@ app.get('/api/wiki/random', async (req, res) => {
 
 app.get('/api/rooms', (_req, res) => {
   res.json(gm.getPublicRooms());
+});
+
+app.get('/api/leaderboard', (_req, res) => {
+  res.json(leaderboard.getLeaderboards());
 });
 
 // --- Serve client in production ---
@@ -228,12 +233,15 @@ io.on('connection', (socket) => {
 
       cleanupBot(roomId);
 
+      const paths = gm.getPaths(roomId);
+      const duration = result.endTime - result.startTime;
       io.to(roomId).emit('game_over', {
         winnerId: pid,
         winnerName: result.players[pid]?.name || 'Player',
-        paths: gm.getPaths(roomId),
-        duration: result.endTime - result.startTime,
+        paths,
+        duration,
       });
+      recordGameResult(result, paths, pid, duration);
     }
   });
 
@@ -320,12 +328,15 @@ function launchRace(roomId) {
       onWin: () => {
         const result = gm.setWinner(roomId, botId);
         if (!result) return;
+        const paths = gm.getPaths(roomId);
+        const duration = result.endTime - result.startTime;
         io.to(roomId).emit('game_over', {
           winnerId: botId,
           winnerName: result.players[botId]?.name || 'Bot',
-          paths: gm.getPaths(roomId),
-          duration: result.endTime - result.startTime,
+          paths,
+          duration,
         });
+        recordGameResult(result, paths, botId, duration);
         cleanupBot(roomId);
       },
     });
@@ -344,6 +355,25 @@ function cleanupBot(roomId) {
 
 function broadcastRooms() {
   io.emit('rooms_list', gm.getPublicRooms());
+}
+
+// Persist a finished game and push the refreshed leaderboards to everyone
+// (so lobby views update live).
+function recordGameResult(result, paths, winnerId, duration) {
+  const players = Object.entries(paths).map(([id, p]) => ({
+    name: p.name,
+    clicks: p.clickCount,
+    isBot: p.isBot,
+    winner: id === winnerId,
+  }));
+  leaderboard.recordGame({
+    players,
+    winnerName: result.players[winnerId]?.name,
+    duration,
+    startArticle: result.startArticle,
+    targetArticle: result.targetArticle,
+  });
+  io.emit('leaderboard_updated', leaderboard.getLeaderboards());
 }
 
 function serializeRoom(room) {
